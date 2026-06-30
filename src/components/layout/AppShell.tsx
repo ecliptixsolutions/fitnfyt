@@ -20,7 +20,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { initials } from "@/lib/format";
 import { useApp } from "@/store/app";
 
@@ -69,38 +69,43 @@ export function AppShell({
     if (ready && !auth) navigate({ to: "/login", replace: true });
   }, [auth, navigate, ready]);
 
-  if (!ready || !auth) return <AppLoading />;
-
   const onLogout = () => {
     logout();
     navigate({ to: "/login" });
   };
   const normalizedSearch = search.trim().toLowerCase();
-  const memberResults = normalizedSearch
-    ? members
+  const { memberResults, leadResults, planResults } = useMemo(() => {
+    if (!normalizedSearch) {
+      return { memberResults: [], leadResults: [], planResults: [] };
+    }
+
+    return {
+      memberResults: members
         .filter((member) =>
           `${member.name} ${member.phone} ${member.email ?? ""} ${member.plan}`
             .toLowerCase()
             .includes(normalizedSearch),
         )
-        .slice(0, 4)
-    : [];
-  const leadResults = normalizedSearch
-    ? leads
+        .slice(0, 4),
+      leadResults: leads
         .filter((lead) =>
           `${lead.name} ${lead.phone} ${lead.enquiry}`.toLowerCase().includes(normalizedSearch),
         )
-        .slice(0, 2)
-    : [];
-  const planResults = normalizedSearch
-    ? [...new Set(members.map((member) => member.plan))]
+        .slice(0, 2),
+      planResults: [...new Set(members.map((member) => member.plan))]
         .filter((plan) => plan.toLowerCase().includes(normalizedSearch))
-        .slice(0, 2)
-    : [];
-  const notificationCount =
-    members.filter((member) => member.status === "expiring").length +
-    payments.filter((payment) => payment.status === "Pending").length +
-    leads.filter((lead) => lead.status === "New").length;
+        .slice(0, 2),
+    };
+  }, [leads, members, normalizedSearch]);
+  const notificationCount = useMemo(
+    () =>
+      members.filter((member) => member.status === "expiring").length +
+      payments.filter((payment) => payment.status === "Pending").length +
+      leads.filter((lead) => lead.status === "New").length,
+    [leads, members, payments],
+  );
+
+  if (!ready || !auth) return <AppLoading />;
 
   const renderNav = (compact: boolean) => (
     <nav className="space-y-1">
@@ -156,7 +161,7 @@ export function AppShell({
       </aside>
 
       <div className={`transition-[padding] ${collapsed ? "lg:pl-20" : "lg:pl-64"}`}>
-        <header className="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur">
+        <header className="sticky top-0 z-30 border-b border-border bg-background">
           <div className="flex h-16 items-center gap-3 px-4 lg:px-6">
             <button
               onClick={() => {

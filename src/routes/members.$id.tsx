@@ -40,6 +40,7 @@ function Detail() {
   const { id } = Route.useParams();
   const members = useApp((state) => state.members);
   const allPayments = useApp((state) => state.payments);
+  const staff = useApp((state) => state.staff);
   const updateMember = useApp((state) => state.updateMember);
   const renewMember = useApp((state) => state.renewMember);
   const toggleMemberFreeze = useApp((state) => state.toggleMemberFreeze);
@@ -188,12 +189,31 @@ function Detail() {
                 className="flex justify-between border-b border-border/50 py-2 text-sm last:border-0"
               >
                 <div>
-                  <div>{payment.plan}</div>
+                  <div>
+                    {payment.plan}
+                    {payment.category === "Personal Training" && (
+                      <span className="ml-2 status-badge status-expiring">PT</span>
+                    )}
+                  </div>
                   <div className="text-xs text-muted-foreground">
                     {dmy(payment.date)} - {payment.mode}
                   </div>
+                  {payment.trainerId && (
+                    <div className="mt-1 text-[10px] text-primary">
+                      Trainer:{" "}
+                      {staff.find((person) => person.id === payment.trainerId)?.name ?? "Unknown"} -{" "}
+                      {payment.commissionPercent ?? 40}% commission
+                    </div>
+                  )}
                 </div>
-                <div className="font-semibold text-primary">{inr(payment.amount)}</div>
+                <div
+                  className={`font-semibold ${
+                    payment.type === "refund" ? "text-amber-400" : "text-primary"
+                  }`}
+                >
+                  {payment.type === "refund" ? "-" : ""}
+                  {inr(payment.amount)}
+                </div>
               </div>
             ))
           ))}

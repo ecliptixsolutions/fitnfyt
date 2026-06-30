@@ -33,7 +33,7 @@ function MemberLayout() {
   }
   return (
     <div className="min-h-screen bg-background text-foreground pb-20">
-      <header className="sticky top-0 z-20 bg-background/90 backdrop-blur border-b border-border">
+      <header className="sticky top-0 z-20 bg-background border-b border-border">
         <div className="flex items-center justify-between px-4 h-14 max-w-2xl mx-auto">
           <Link to="/member/home" className="font-black text-foreground">
             FIT <span className="text-primary">&</span> FYT

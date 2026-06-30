@@ -64,6 +64,11 @@ export interface Payment {
   plan: string;
   status: "Paid" | "Pending";
   type?: "payment" | "refund";
+  category?: "Membership" | "Personal Training" | "Other";
+  trainerId?: string;
+  commissionPercent?: number;
+  commissionAmount?: number;
+  refundForPaymentId?: string;
   reference?: string;
   notes?: string;
   dueDate?: string;
@@ -86,8 +91,27 @@ export interface PayrollRecord {
   baseSalary: number;
   bonus: number;
   deduction: number;
+  commissionTotal?: number;
+  paidCommissionIds?: string[];
   paidAt?: string;
   mode?: Payment["mode"];
+}
+
+export interface TrainerCommissionEntry {
+  id: string;
+  paymentId: string;
+  staffId: string;
+  staffName: string;
+  memberId: string;
+  memberName: string;
+  packageName: string;
+  paymentDate: string;
+  totalAmount: number;
+  refundedAmount: number;
+  netAmount: number;
+  commissionPercent: number;
+  commissionAmount: number;
+  payoutStatus: "Pending" | "Paid" | "Refunded";
 }
 export interface Branch {
   id: string;
@@ -128,6 +152,8 @@ export interface NotificationSettings {
   paymentReminders: boolean;
 }
 
+export type NewMemberInput = Omit<Member, "id" | "checkIns" | "streak"> & { id?: string };
+
 interface State {
   auth: { role: Role | null; name: string; phone: string } | null;
   members: Member[];
@@ -143,7 +169,7 @@ interface State {
   currentBranch: string;
   login: (role: Role, phone: string, password: string) => boolean;
   logout: () => void;
-  addMember: (m: Omit<Member, "id" | "checkIns" | "streak">) => void;
+  addMember: (m: NewMemberInput) => void;
   importMembers: (members: Omit<Member, "id" | "checkIns" | "streak">[]) => void;
   updateMember: (id: string, patch: Partial<Member>) => void;
   renewMember: (
@@ -174,6 +200,7 @@ interface State {
   convertLead: (id: string) => void;
   addPayment: (p: Omit<Payment, "id">) => void;
   updatePayment: (id: string, patch: Partial<Payment>) => void;
+  deletePayment: (id: string) => void;
   addRefund: (p: Omit<Payment, "id" | "type" | "status">) => void;
   addBranch: (branch: Omit<Branch, "id" | "members" | "revenue">) => void;
   updateBranch: (id: string, patch: Partial<Branch>) => void;
@@ -211,6 +238,9 @@ const seedMembers: Member[] = [
     totalAmount: 24999,
     checkIns: [offset(0), offset(-1), offset(-2), offset(-3)],
     streak: 12,
+    workoutPlan: ["Upper body strength", "HIIT conditioning", "Mobility cooldown"],
+    documents: [{ id: "doc-m1-1", name: "ID proof.pdf", uploadedAt: offset(-180) }],
+    branchId: "b1",
   },
   {
     id: "m2",
@@ -224,6 +254,9 @@ const seedMembers: Member[] = [
     totalAmount: 11999,
     checkIns: [offset(0), offset(-1)],
     streak: 5,
+    workoutPlan: ["Fat-loss circuit", "Core stability"],
+    documents: [],
+    branchId: "b1",
   },
   {
     id: "m3",
@@ -237,6 +270,9 @@ const seedMembers: Member[] = [
     totalAmount: 8999,
     checkIns: [],
     streak: 0,
+    workoutPlan: ["Reactivation assessment"],
+    documents: [],
+    branchId: "b2",
   },
   {
     id: "m4",
@@ -250,6 +286,9 @@ const seedMembers: Member[] = [
     totalAmount: 11999,
     checkIns: [offset(0)],
     streak: 3,
+    workoutPlan: ["Yoga mobility", "Lower body strength"],
+    documents: [{ id: "doc-m4-1", name: "Medical declaration.pdf", uploadedAt: offset(-60) }],
+    branchId: "b1",
   },
   {
     id: "m5",
@@ -263,6 +302,9 @@ const seedMembers: Member[] = [
     totalAmount: 8999,
     checkIns: [offset(-1)],
     streak: 0,
+    workoutPlan: ["Beginner hypertrophy", "Treadmill intervals"],
+    documents: [],
+    branchId: "b2",
   },
 ];
 
@@ -275,24 +317,90 @@ const seedStaff: Staff[] = [
     joined: offset(-400),
     salary: 25000,
     active: true,
+    permissions: ["View Members", "Mark Attendance", "View Reports"],
+    shift: "06:00 - 14:00",
+    weeklyOff: "Sunday",
+    assignedMemberIds: ["m1", "m2"],
+    branchId: "b1",
   },
   {
     id: "s2",
-    name: "Meena Rao",
+    name: "Arjun Mehta",
     phone: "+91 99999 22222",
-    role: "Receptionist",
-    joined: offset(-200),
-    salary: 18000,
+    role: "Trainer",
+    joined: offset(-300),
+    salary: 23000,
     active: true,
+    permissions: ["View Members", "Mark Attendance"],
+    shift: "14:00 - 22:00",
+    weeklyOff: "Monday",
+    assignedMemberIds: ["m4"],
+    branchId: "b1",
   },
   {
     id: "s3",
-    name: "Suresh Kumar",
+    name: "Neha Kapoor",
     phone: "+91 99999 33333",
+    role: "Trainer",
+    joined: offset(-260),
+    salary: 22000,
+    active: true,
+    permissions: ["View Members", "Mark Attendance"],
+    shift: "07:00 - 15:00",
+    weeklyOff: "Tuesday",
+    assignedMemberIds: ["m3"],
+    branchId: "b2",
+  },
+  {
+    id: "s4",
+    name: "Kabir Khan",
+    phone: "+91 99999 44444",
+    role: "Trainer",
+    joined: offset(-190),
+    salary: 21000,
+    active: true,
+    permissions: ["View Members", "Mark Attendance"],
+    shift: "16:00 - 23:00",
+    weeklyOff: "Wednesday",
+    assignedMemberIds: ["m5"],
+    branchId: "b2",
+  },
+  {
+    id: "s5",
+    name: "Riya Shah",
+    phone: "+91 99999 55555",
+    role: "Trainer",
+    joined: offset(-120),
+    salary: 20000,
+    active: true,
+    permissions: ["View Members", "Mark Attendance", "Manage Leads"],
+    shift: "10:00 - 18:00",
+    weeklyOff: "Friday",
+    assignedMemberIds: [],
+    branchId: "b1",
+  },
+  {
+    id: "s6",
+    name: "Suresh Kumar",
+    phone: "+91 99999 66666",
     role: "Manager",
     joined: offset(-600),
     salary: 40000,
     active: true,
+    permissions: [
+      "View Members",
+      "Add Members",
+      "Edit Members",
+      "View Finance",
+      "Record Payments",
+      "Mark Attendance",
+      "View Reports",
+      "Manage Leads",
+    ],
+    shift: "10:00 - 19:00",
+    weeklyOff: "Thursday",
+    assignedMemberIds: [],
+    branchId: "b1",
   },
 ];
 
@@ -305,6 +413,8 @@ const seedLeads: Lead[] = [
     status: "Interested",
     enquiry: "Weight Loss",
     followUp: offset(1),
+    assignedStaffId: "s5",
+    branchId: "b1",
   },
   {
     id: "l2",
@@ -314,6 +424,8 @@ const seedLeads: Lead[] = [
     status: "New",
     enquiry: "Yoga",
     followUp: offset(0),
+    assignedStaffId: "s2",
+    branchId: "b1",
   },
   {
     id: "l3",
@@ -323,6 +435,30 @@ const seedLeads: Lead[] = [
     status: "Converted",
     enquiry: "Muscle Gain",
     followUp: offset(-5),
+    assignedStaffId: "s3",
+    branchId: "b2",
+  },
+  {
+    id: "l4",
+    name: "Fatima Khan",
+    phone: "+91 94444 44444",
+    source: "Website",
+    status: "Follow-up",
+    enquiry: "Personal Training",
+    followUp: offset(2),
+    assignedStaffId: "s1",
+    branchId: "b1",
+  },
+  {
+    id: "l5",
+    name: "Nikhil Desai",
+    phone: "+91 95555 55555",
+    source: "WhatsApp",
+    status: "New",
+    enquiry: "MMA Classes",
+    followUp: offset(1),
+    assignedStaffId: "s4",
+    branchId: "b2",
   },
 ];
 
@@ -335,6 +471,8 @@ const seedPayments: Payment[] = [
     mode: "UPI",
     plan: "Premium Plus",
     status: "Paid",
+    category: "Membership",
+    branchId: "b1",
   },
   {
     id: "p2",
@@ -344,6 +482,8 @@ const seedPayments: Payment[] = [
     mode: "Card",
     plan: "Premium",
     status: "Paid",
+    category: "Membership",
+    branchId: "b1",
   },
   {
     id: "p3",
@@ -353,6 +493,8 @@ const seedPayments: Payment[] = [
     mode: "Cash",
     plan: "Premium",
     status: "Paid",
+    category: "Membership",
+    branchId: "b1",
   },
   {
     id: "p4",
@@ -362,6 +504,9 @@ const seedPayments: Payment[] = [
     mode: "UPI",
     plan: "Basic",
     status: "Pending",
+    category: "Membership",
+    dueDate: offset(2),
+    branchId: "b2",
   },
   {
     id: "p5",
@@ -371,6 +516,73 @@ const seedPayments: Payment[] = [
     mode: "Cash",
     plan: "Basic",
     status: "Paid",
+    category: "Membership",
+    branchId: "b2",
+  },
+  {
+    id: "pt1",
+    memberId: "m1",
+    amount: 10000,
+    date: offset(-8),
+    mode: "UPI",
+    plan: "PT Strength Transformation - 12 sessions",
+    status: "Paid",
+    type: "payment",
+    category: "Personal Training",
+    trainerId: "s1",
+    commissionPercent: 40,
+    commissionAmount: 4000,
+    reference: "PT-1001",
+    branchId: "b1",
+  },
+  {
+    id: "pt2",
+    memberId: "m2",
+    amount: 12000,
+    date: offset(-5),
+    mode: "Card",
+    plan: "PT Fat Loss - 16 sessions",
+    status: "Paid",
+    type: "payment",
+    category: "Personal Training",
+    trainerId: "s2",
+    commissionPercent: 35,
+    commissionAmount: 4200,
+    reference: "PT-1002",
+    branchId: "b1",
+  },
+  {
+    id: "pt3",
+    memberId: "m4",
+    amount: 8000,
+    date: offset(-3),
+    mode: "Cash",
+    plan: "PT Mobility Rehab - 8 sessions",
+    status: "Paid",
+    type: "payment",
+    category: "Personal Training",
+    trainerId: "s3",
+    commissionPercent: 50,
+    commissionAmount: 4000,
+    reference: "PT-1003",
+    branchId: "b1",
+  },
+  {
+    id: "pt3-refund",
+    memberId: "m4",
+    amount: 2000,
+    date: offset(-1),
+    mode: "Cash",
+    plan: "PT Mobility Rehab - partial refund",
+    status: "Paid",
+    type: "refund",
+    category: "Personal Training",
+    trainerId: "s3",
+    commissionPercent: 50,
+    refundForPaymentId: "pt3",
+    reference: "RF-PT-1003",
+    notes: "Two PT sessions refunded",
+    branchId: "b1",
   },
 ];
 
@@ -390,7 +602,7 @@ const seedBranches: Branch[] = [
     id: "b2",
     name: "Fit Force Bandra",
     city: "Mumbai",
-    manager: "Meena Rao",
+    manager: "Neha Kapoor",
     members: 156,
     revenue: 89200,
     address: "Bandra West, Mumbai, 400050",
@@ -450,6 +662,77 @@ const statusFromExpiry = (expiryDate: string): Status => {
   return "active";
 };
 
+export const isPersonalTrainingPayment = (payment: Payment) =>
+  payment.category === "Personal Training" || payment.plan.toLowerCase().includes("pt ");
+
+const memberPaymentContribution = (payment: Payment) => {
+  if (payment.status !== "Paid" || isPersonalTrainingPayment(payment)) return 0;
+  return payment.type === "refund" ? -payment.amount : payment.amount;
+};
+
+export const monthKey = (value: string) => value.slice(0, 7);
+
+export function getTrainerCommissionEntries(
+  payments: Payment[],
+  members: Member[],
+  staff: Staff[],
+  payroll: PayrollRecord[] = [],
+): TrainerCommissionEntry[] {
+  const refundsByPayment = payments
+    .filter((payment) => payment.type === "refund")
+    .reduce<Record<string, number>>((acc, refund) => {
+      if (!refund.refundForPaymentId) return acc;
+      acc[refund.refundForPaymentId] = (acc[refund.refundForPaymentId] ?? 0) + refund.amount;
+      return acc;
+    }, {});
+
+  const paidCommissionIds = new Set(
+    payroll.flatMap((record) => (record.paidAt ? (record.paidCommissionIds ?? []) : [])),
+  );
+
+  return payments
+    .filter(
+      (payment) =>
+        payment.status === "Paid" &&
+        payment.type !== "refund" &&
+        isPersonalTrainingPayment(payment) &&
+        Boolean(payment.trainerId),
+    )
+    .map((payment) => {
+      const trainer = staff.find((person) => person.id === payment.trainerId);
+      const member = members.find((item) => item.id === payment.memberId);
+      const refundedAmount = refundsByPayment[payment.id] ?? 0;
+      const netAmount = Math.max(0, payment.amount - refundedAmount);
+      const commissionPercent = payment.commissionPercent ?? 40;
+      const commissionAmount =
+        netAmount === payment.amount && typeof payment.commissionAmount === "number"
+          ? payment.commissionAmount
+          : Math.round((netAmount * commissionPercent) / 100);
+
+      return {
+        id: `commission-${payment.id}`,
+        paymentId: payment.id,
+        staffId: payment.trainerId!,
+        staffName: trainer?.name ?? "Unknown trainer",
+        memberId: payment.memberId,
+        memberName: member?.name ?? "Unknown member",
+        packageName: payment.plan,
+        paymentDate: payment.date,
+        totalAmount: payment.amount,
+        refundedAmount,
+        netAmount,
+        commissionPercent,
+        commissionAmount,
+        payoutStatus:
+          netAmount <= 0
+            ? "Refunded"
+            : paidCommissionIds.has(`commission-${payment.id}`)
+              ? "Paid"
+              : "Pending",
+      };
+    });
+}
+
 export const useApp = create<State>()(
   persist(
     (set, get) => ({
@@ -504,6 +787,8 @@ export const useApp = create<State>()(
                     mode: "UPI",
                     plan: m.plan,
                     status: "Paid",
+                    type: "payment",
+                    category: "Membership",
                     branchId: m.branchId ?? get().currentBranch,
                   },
                 ]
@@ -557,6 +842,8 @@ export const useApp = create<State>()(
               mode,
               plan,
               status: "Paid",
+              type: "payment",
+              category: "Membership",
             },
           ],
         });
@@ -735,31 +1022,121 @@ export const useApp = create<State>()(
               ],
         });
       },
-      addPayment: (p) =>
+      addPayment: (p) => {
+        const category = p.category ?? "Membership";
+        const payment = {
+          ...p,
+          id: id(),
+          type: p.type ?? "payment",
+          category,
+          branchId: p.branchId ?? get().currentBranch,
+          commissionPercent:
+            category === "Personal Training" ? (p.commissionPercent ?? 40) : p.commissionPercent,
+          commissionAmount:
+            category === "Personal Training"
+              ? Math.round((p.amount * (p.commissionPercent ?? 40)) / 100)
+              : p.commissionAmount,
+        };
         set({
-          payments: [
-            ...get().payments,
-            { ...p, id: id(), branchId: p.branchId ?? get().currentBranch },
-          ],
+          payments: [...get().payments, payment],
           members:
-            p.status === "Paid"
+            p.status === "Paid" && category !== "Personal Training"
               ? get().members.map((member) =>
                   member.id === p.memberId
                     ? { ...member, amountPaid: member.amountPaid + p.amount }
                     : member,
                 )
               : get().members,
-        }),
-      updatePayment: (paymentId, patch) =>
+        });
+      },
+      updatePayment: (paymentId, patch) => {
+        const previous = get().payments.find((payment) => payment.id === paymentId);
+        if (!previous) return;
+        const category = patch.category ?? previous.category ?? "Membership";
+        const next = {
+          ...previous,
+          ...patch,
+          category,
+          commissionPercent:
+            category === "Personal Training"
+              ? (patch.commissionPercent ?? previous.commissionPercent ?? 40)
+              : patch.commissionPercent,
+        };
+        const normalizedNext = {
+          ...next,
+          commissionAmount:
+            category === "Personal Training"
+              ? Math.round((next.amount * (next.commissionPercent ?? 40)) / 100)
+              : next.commissionAmount,
+        };
+        const previousContribution = memberPaymentContribution(previous);
+        const nextContribution = memberPaymentContribution(normalizedNext);
         set({
           payments: get().payments.map((payment) =>
-            payment.id === paymentId ? { ...payment, ...patch } : payment,
+            payment.id === paymentId ? normalizedNext : payment,
           ),
-        }),
-      addRefund: (payment) =>
+          members: get().members.map((member) => {
+            let amountPaid = member.amountPaid;
+            if (member.id === previous.memberId) amountPaid -= previousContribution;
+            if (member.id === normalizedNext.memberId) amountPaid += nextContribution;
+            return amountPaid === member.amountPaid
+              ? member
+              : { ...member, amountPaid: Math.max(0, amountPaid) };
+          }),
+        });
+      },
+      deletePayment: (paymentId) => {
+        const payment = get().payments.find((item) => item.id === paymentId);
+        if (!payment) return;
+        const removedPayments = get().payments.filter(
+          (item) => item.id === paymentId || item.refundForPaymentId === paymentId,
+        );
+        const contributionByMember = removedPayments.reduce<Record<string, number>>(
+          (acc, item) => ({
+            ...acc,
+            [item.memberId]: (acc[item.memberId] ?? 0) + memberPaymentContribution(item),
+          }),
+          {},
+        );
         set({
-          payments: [...get().payments, { ...payment, id: id(), type: "refund", status: "Paid" }],
-        }),
+          payments: get().payments.filter(
+            (item) => item.id !== paymentId && item.refundForPaymentId !== paymentId,
+          ),
+          members: get().members.map((member) => {
+            const contribution = contributionByMember[member.id] ?? 0;
+            return contribution
+              ? { ...member, amountPaid: Math.max(0, member.amountPaid - contribution) }
+              : member;
+          }),
+        });
+      },
+      addRefund: (payment) => {
+        const original = payment.refundForPaymentId
+          ? get().payments.find((item) => item.id === payment.refundForPaymentId)
+          : undefined;
+        const category = payment.category ?? original?.category ?? "Membership";
+        const refund = {
+          ...payment,
+          id: id(),
+          type: "refund" as const,
+          status: "Paid" as const,
+          category,
+          trainerId: payment.trainerId ?? original?.trainerId,
+          commissionPercent: payment.commissionPercent ?? original?.commissionPercent,
+          branchId: payment.branchId ?? original?.branchId ?? get().currentBranch,
+        };
+        set({
+          payments: [...get().payments, refund],
+          members:
+            category !== "Personal Training"
+              ? get().members.map((member) =>
+                  member.id === payment.memberId
+                    ? { ...member, amountPaid: Math.max(0, member.amountPaid - payment.amount) }
+                    : member,
+                )
+              : get().members,
+        });
+      },
       addBranch: (branch) =>
         set({
           branches: [

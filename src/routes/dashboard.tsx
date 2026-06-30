@@ -9,10 +9,10 @@ import {
   UserPlus,
   Users,
 } from "lucide-react";
-import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
+import { useMemo } from "react";
 import { AppShell, Card, StatusBadge } from "@/components/layout/AppShell";
 import { colorFromName, daysBetween, dmy, initials, inr } from "@/lib/format";
-import { useApp } from "@/store/app";
+import { getTrainerCommissionEntries, useApp } from "@/store/app";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard - Fit & Fyt GymOS" }] }),
@@ -20,57 +20,100 @@ export const Route = createFileRoute("/dashboard")({
 });
 
 function Dashboard() {
-  const { auth, members, payments, leads } = useApp();
-  const now = new Date();
-  const active = members.filter((m) => m.status === "active" || m.status === "expiring").length;
-  const paidPayments = payments.filter(
-    (payment) => payment.status === "Paid" && payment.type !== "refund",
-  );
-  const monthRevenue = paidPayments
-    .filter((payment) => {
-      const date = new Date(payment.date);
+  const auth = useApp((state) => state.auth);
+  const members = useApp((state) => state.members);
+  const payments = useApp((state) => state.payments);
+  const leads = useApp((state) => state.leads);
+  const staff = useApp((state) => state.staff);
+  const payroll = useApp((state) => state.payroll ?? []);
+
+  const {
+    active,
+    expiring,
+    joinedThisMonth,
+    monthRevenue,
+    paidPayments,
+    pendingPayments,
+    pendingTrainerCommission,
+    recentMembers,
+    revenueChange,
+    revenueData,
+    todayCheckins,
+    newLeads,
+  } = useMemo(() => {
+    const now = new Date();
+    const today = now.toDateString();
+    const active = members.filter((m) => m.status === "active" || m.status === "expiring").length;
+    const paidPayments = payments.filter(
+      (payment) => payment.status === "Paid" && payment.type !== "refund",
+    );
+    const monthRevenue = paidPayments
+      .filter((payment) => {
+        const date = new Date(payment.date);
+        return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+      })
+      .reduce((sum, payment) => sum + payment.amount, 0);
+    const previousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const previousRevenue = paidPayments
+      .filter((payment) => {
+        const date = new Date(payment.date);
+        return (
+          date.getMonth() === previousMonth.getMonth() &&
+          date.getFullYear() === previousMonth.getFullYear()
+        );
+      })
+      .reduce((sum, payment) => sum + payment.amount, 0);
+    const revenueChange =
+      previousRevenue === 0
+        ? null
+        : Math.round(((monthRevenue - previousRevenue) / previousRevenue) * 100);
+    const joinedThisMonth = members.filter((member) => {
+      const date = new Date(member.startDate);
       return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
-    })
-    .reduce((sum, payment) => sum + payment.amount, 0);
-  const previousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const previousRevenue = paidPayments
-    .filter((payment) => {
-      const date = new Date(payment.date);
-      return (
-        date.getMonth() === previousMonth.getMonth() &&
-        date.getFullYear() === previousMonth.getFullYear()
-      );
-    })
-    .reduce((sum, payment) => sum + payment.amount, 0);
-  const revenueChange =
-    previousRevenue === 0
-      ? null
-      : Math.round(((monthRevenue - previousRevenue) / previousRevenue) * 100);
-  const joinedThisMonth = members.filter((member) => {
-    const date = new Date(member.startDate);
-    return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
-  }).length;
-  const revenueData = Array.from({ length: 6 }, (_, index) => {
-    const date = new Date(now.getFullYear(), now.getMonth() - 5 + index, 1);
+    }).length;
+    const revenueData = Array.from({ length: 6 }, (_, index) => {
+      const date = new Date(now.getFullYear(), now.getMonth() - 5 + index, 1);
+      return {
+        month: date.toLocaleDateString("en-IN", { month: "short" }),
+        revenue: paidPayments
+          .filter((payment) => {
+            const paidAt = new Date(payment.date);
+            return (
+              paidAt.getMonth() === date.getMonth() && paidAt.getFullYear() === date.getFullYear()
+            );
+          })
+          .reduce((sum, payment) => sum + payment.amount, 0),
+      };
+    });
+    const expiring = members.filter((m) => {
+      const days = daysBetween(now, new Date(m.expiryDate));
+      return days > 0 && days <= 7;
+    }).length;
+    const todayCheckins = members.filter((m) =>
+      m.checkIns.some((checkIn) => new Date(checkIn).toDateString() === today),
+    ).length;
+    const pendingTrainerCommission = getTrainerCommissionEntries(payments, members, staff, payroll)
+      .filter((entry) => entry.payoutStatus === "Pending")
+      .reduce((sum, entry) => sum + entry.commissionAmount, 0);
+    const recentMembers = [...members]
+      .sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())
+      .slice(0, 6);
+
     return {
-      month: date.toLocaleDateString("en-IN", { month: "short" }),
-      revenue: paidPayments
-        .filter((payment) => {
-          const paidAt = new Date(payment.date);
-          return (
-            paidAt.getMonth() === date.getMonth() && paidAt.getFullYear() === date.getFullYear()
-          );
-        })
-        .reduce((sum, payment) => sum + payment.amount, 0),
+      active,
+      expiring,
+      joinedThisMonth,
+      monthRevenue,
+      paidPayments,
+      pendingPayments: payments.filter((p) => p.status === "Pending").length,
+      pendingTrainerCommission,
+      recentMembers,
+      revenueChange,
+      revenueData,
+      todayCheckins,
+      newLeads: leads.filter((lead) => lead.status === "New").length,
     };
-  });
-  const expiring = members.filter((m) => {
-    const days = daysBetween(now, new Date(m.expiryDate));
-    return days > 0 && days <= 7;
-  }).length;
-  const todayCheckins = members.filter((m) =>
-    m.checkIns.some((checkIn) => new Date(checkIn).toDateString() === now.toDateString()),
-  ).length;
+  }, [leads, members, payments, payroll, staff]);
 
   const stats = [
     {
@@ -142,37 +185,7 @@ function Dashboard() {
             <ArrowUpRight className="h-4 w-4 text-primary" />
           </div>
           <div className="mt-5 h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={revenueData}>
-                <defs>
-                  <linearGradient id="revenueFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="var(--primary)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <XAxis
-                  dataKey="month"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: "var(--card)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 8,
-                  }}
-                  formatter={(value) => inr(Number(value))}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="revenue"
-                  stroke="var(--primary)"
-                  strokeWidth={2}
-                  fill="url(#revenueFill)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            <RevenueTrendChart data={revenueData} />
           </div>
         </Card>
 
@@ -191,14 +204,15 @@ function Dashboard() {
               to="/members"
             />
             <QueueItem
-              label={`${payments.filter((p) => p.status === "Pending").length} payments overdue`}
+              label={`${pendingPayments} payments overdue`}
               action="Collect"
               to="/finance/dues"
             />
+            <QueueItem label={`${newLeads} new leads to follow up`} action="Assign" to="/leads" />
             <QueueItem
-              label={`${leads.filter((lead) => lead.status === "New").length} new leads to follow up`}
-              action="Assign"
-              to="/leads"
+              label={`${inr(pendingTrainerCommission)} trainer commission payable`}
+              action="Payroll"
+              to="/staff/payroll"
             />
             <QueueItem label="Send attendance follow-ups" action="SMS" to="/messages" />
             <div className="flex items-center justify-between gap-3 border-t border-border py-3 text-xs">
@@ -231,38 +245,35 @@ function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {[...members]
-                .sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())
-                .slice(0, 6)
-                .map((member) => (
-                  <tr key={member.id}>
-                    <td>
-                      <Link
-                        to="/members/$id"
-                        params={{ id: member.id }}
-                        className="flex items-center gap-3"
+              {recentMembers.map((member) => (
+                <tr key={member.id}>
+                  <td>
+                    <Link
+                      to="/members/$id"
+                      params={{ id: member.id }}
+                      className="flex items-center gap-3"
+                    >
+                      <div
+                        className={`grid h-8 w-8 place-items-center rounded-full text-[10px] font-bold text-white ${colorFromName(member.name)}`}
                       >
-                        <div
-                          className={`grid h-8 w-8 place-items-center rounded-full text-[10px] font-bold text-white ${colorFromName(member.name)}`}
-                        >
-                          {initials(member.name)}
+                        {initials(member.name)}
+                      </div>
+                      <div>
+                        <div className="font-semibold">{member.name}</div>
+                        <div className="text-[10px] text-muted-foreground">
+                          {member.id.toUpperCase()}
                         </div>
-                        <div>
-                          <div className="font-semibold">{member.name}</div>
-                          <div className="text-[10px] text-muted-foreground">
-                            {member.id.toUpperCase()}
-                          </div>
-                        </div>
-                      </Link>
-                    </td>
-                    <td>{member.plan}</td>
-                    <td>
-                      <StatusBadge status={member.status} />
-                    </td>
-                    <td>{member.checkIns.length}</td>
-                    <td className="text-muted-foreground">{dmy(member.expiryDate)}</td>
-                  </tr>
-                ))}
+                      </div>
+                    </Link>
+                  </td>
+                  <td>{member.plan}</td>
+                  <td>
+                    <StatusBadge status={member.status} />
+                  </td>
+                  <td>{member.checkIns.length}</td>
+                  <td className="text-muted-foreground">{dmy(member.expiryDate)}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -296,6 +307,49 @@ function QueueItem({ label, action, to }: { label: string; action: string; to: s
       >
         {action}
       </Link>
+    </div>
+  );
+}
+
+function RevenueTrendChart({ data }: { data: { month: string; revenue: number }[] }) {
+  const width = 600;
+  const height = 220;
+  const padding = 28;
+  const max = Math.max(...data.map((item) => item.revenue), 1);
+  const step = data.length > 1 ? (width - padding * 2) / (data.length - 1) : 0;
+  const points = data.map((item, index) => {
+    const x = padding + index * step;
+    const y = height - padding - (item.revenue / max) * (height - padding * 2);
+    return { ...item, x, y };
+  });
+  const line = points.map((point) => `${point.x},${point.y}`).join(" ");
+  const area = `${padding},${height - padding} ${line} ${width - padding},${height - padding}`;
+
+  return (
+    <div className="h-full w-full">
+      <svg className="h-full w-full overflow-visible" viewBox={`0 0 ${width} ${height}`}>
+        <defs>
+          <linearGradient id="dashboardRevenueFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--primary)" stopOpacity="0.35" />
+            <stop offset="100%" stopColor="var(--primary)" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <polygon points={area} fill="url(#dashboardRevenueFill)" />
+        <polyline points={line} fill="none" stroke="var(--primary)" strokeWidth="3" />
+        {points.map((point) => (
+          <g key={point.month}>
+            <circle cx={point.x} cy={point.y} r="4" fill="var(--primary)" />
+            <text
+              x={point.x}
+              y={height - 4}
+              textAnchor="middle"
+              className="fill-muted-foreground text-[11px]"
+            >
+              {point.month}
+            </text>
+          </g>
+        ))}
+      </svg>
     </div>
   );
 }
